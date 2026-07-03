@@ -130,7 +130,7 @@ if (isDeno) {
   g.Deno.serve({ port }, app.fetch);
 } else if (isBun) {
   const port = parseInt(g.Bun.env.PORT) || 3000;
-  g.Bun.serve({ fetch: app.fetch, port });
+  g.Bun.serve({ fetch: app.fetch, port, idleTimeout: 120 });
 }
 
 // For Cloudflare Workers and other environments that use export default.
