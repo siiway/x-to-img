@@ -16,6 +16,7 @@ interface FontCache {
 }
 
 let fontCache: FontCache | null = null
+let fontDownloadPromise: Promise<FontCache> | null = null
 
 function readU16(buf: Uint8Array, off: number) {
   return (buf[off] | (buf[off + 1] << 8)) >>> 0
@@ -97,7 +98,9 @@ async function extractFonts(zipBuf: ArrayBuffer) {
 }
 
 async function downloadAndExtract(): Promise<FontCache> {
-  const resp = await fetch(FONT_ZIP_URL)
+  const resp = await fetch(FONT_ZIP_URL, {
+    signal: AbortSignal.timeout(120_000),
+  })
   if (!resp.ok) throw new Error(`Failed to download fonts: ${resp.status}`)
 
   const zipBuf = await resp.arrayBuffer()
@@ -108,10 +111,12 @@ async function downloadAndExtract(): Promise<FontCache> {
 export async function loadFonts(kv?: FontKV): Promise<FontCache> {
   if (fontCache) return fontCache
 
+  if (fontDownloadPromise) return fontDownloadPromise
+
   if (kv) {
     const [cachedRegular, cachedBold] = await Promise.all([
-      kv.get(KV_KEYS.regular, "arrayBuffer"),
-      kv.get(KV_KEYS.bold, "arrayBuffer"),
+      kv.get(KV_KEYS.regular),
+      kv.get(KV_KEYS.bold),
     ])
     if (cachedRegular && cachedBold) {
       fontCache = { regular: cachedRegular as ArrayBuffer, bold: cachedBold as ArrayBuffer }
@@ -119,17 +124,23 @@ export async function loadFonts(kv?: FontKV): Promise<FontCache> {
     }
   }
 
-  const fonts = await downloadAndExtract()
+  fontDownloadPromise = downloadAndExtract()
 
-  if (kv) {
-    await Promise.all([
-      kv.put(KV_KEYS.regular, fonts.regular),
-      kv.put(KV_KEYS.bold, fonts.bold),
-    ])
+  try {
+    const fonts = await fontDownloadPromise
+
+    if (kv) {
+      await Promise.all([
+        kv.put(KV_KEYS.regular, fonts.regular),
+        kv.put(KV_KEYS.bold, fonts.bold),
+      ])
+    }
+
+    fontCache = fonts
+    return fonts
+  } finally {
+    fontDownloadPromise = null
   }
-
-  fontCache = fonts
-  return fontCache
 }
 
 export function getSatoriFonts(fonts: FontCache) {
